@@ -6,6 +6,7 @@ from pyspark.ml.feature import Imputer, StringIndexer, OneHotEncoder
 from pyspark.ml.feature import VectorAssembler
 from pyspark.sql.types import *
 from pyspark.sql.functions import udf
+import os
 
 
 import numpy as np
@@ -23,7 +24,8 @@ print('Session created')
 
 # creating my own shema
 # criteoFiles = "day_0"
-criteoFiles = "subset/part-00000-bb26ef29-aa66-4261-b605-16e2dc257df1-c000.csv"
+# criteoFiles = "subset/part-00000-bb26ef29-aa66-4261-b605-16e2dc257df1-c000.csv"
+
 
 criteoSchema = StructType([
     StructField("label", IntegerType(), True),
@@ -76,15 +78,43 @@ criteoSchema = StructType([
 #     .csv(criteoFiles)
 # )
 
-criteoDF = (spark.read
-    .option("header", "false")
-    .option("delimiter", ",")
-    .schema(criteoSchema)
-    .csv(criteoFiles)
-)
+# criteoDF = (spark.read
+#     .option("header", "false")
+#     .option("delimiter", ",")
+#     .schema(criteoSchema)
+#     .csv(criteoFiles)
+# )
 
 
-criteoDF = criteoDF.repartition(50)
+
+criteoDir = "/home/ubuntu/criteo_full/"
+
+criteoDF = None
+count = 0
+
+for filename in os.listdir(criteoDir):
+  if filename.endswith(".parquet"):
+    if not criteoDF:
+      criteoDF = (spark.read              
+            .option("delimiter", "\t")  
+            .schema(criteoSchema)        # Use the specified schema
+            .parquet(os.path.join(criteoDir, filename))   # Creates a DataFrame from Parquet after reading in the file
+          )
+    else:
+      temp = (spark.read              
+            .option("delimiter", "\t")  
+            .schema(criteoSchema)        # Use the specified schema
+            .parquet(os.path.join(criteoDir, filename))   # Creates a DataFrame from Parquet after reading in the file
+          )
+      criteoDF = criteoDF.union(temp)
+    # count += 1
+    # if count >= 5:
+    #   break
+
+
+
+
+criteoDF = criteoDF.repartition(5000)
 
 
 # criteoSmallDF.printSchema()
@@ -244,7 +274,7 @@ def convert_to_numpy(df):
 # Save the train data
 criteoTrainParquet = "/home/ubuntu/criteoSubset_train"
 
-(criteoTrain.coalesce(1).write                       # Our DataFrameWriter
+(criteoTrain.write                       # Our DataFrameWriter
   .option("delimiter", "\t")  
   .option("compression", "snappy")
   .mode("overwrite")                       # Replace existing files
@@ -255,7 +285,7 @@ criteoTrainParquet = "/home/ubuntu/criteoSubset_train"
 # Save the test data
 criteoTestParquet = "/home/ubuntu/criteoSubset_test"
 
-(criteoTest.coalesce(1).write                       # Our DataFrameWriter
+(criteoTest.write                       # Our DataFrameWriter
   .option("delimiter", "\t")  
   .option("compression", "snappy")
   .mode("overwrite")                       # Replace existing files
