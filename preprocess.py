@@ -1,3 +1,13 @@
+# We follow the instructions provided by Amany in her blog:
+# https://medium.com/swlh/preprocessing-criteo-dataset-for-prediction-of-click-through-rate-on-ads-7dee096a2dd9
+# This file is the full version of the total preprocess procedure. It mainly contains 
+# reading in data, balancing data with different labels, subseting categorical features,
+# imputing numerical and categorical data, encoding categorical data with both ordinal encoding and 
+# one-hot encoding, spliting the data into training set and testing set, 
+# as well as create dataframe that can be used for Spark Mllib.
+# Runned with Hadoop Cluster with 12 m4.xlarge working instances with master node storage of 100 Gib.
+
+
 from pyspark import SparkConf, SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, IntegerType, StringType, BooleanType, FloatType
@@ -12,7 +22,7 @@ import os
 import numpy as np
 import pandas as pd
 
-conf = SparkConf().setMaster("local[4]").setAppName("preprocess")
+conf = SparkConf().setAppName("preprocess")
 sc = SparkContext(conf = conf)
 
 spark = SparkSession(sc) \
@@ -20,12 +30,6 @@ spark = SparkSession(sc) \
         .appName('WeCloud Spark Training') \
         .getOrCreate()
 print('Session created')
-
-
-# creating my own shema
-# criteoFiles = "day_0"
-# criteoFiles = "subset/part-00000-bb26ef29-aa66-4261-b605-16e2dc257df1-c000.csv"
-
 
 criteoSchema = StructType([
     StructField("label", IntegerType(), True),
@@ -71,23 +75,8 @@ criteoSchema = StructType([
 ]
 )
 
-# criteoDF = (spark.read
-#     .option("header", "false")
-#     .option("delimiter", "\t")
-#     .schema(criteoSchema)
-#     .csv(criteoFiles)
-# )
 
-# criteoDF = (spark.read
-#     .option("header", "false")
-#     .option("delimiter", ",")
-#     .schema(criteoSchema)
-#     .csv(criteoFiles)
-# )
-
-
-
-criteoDir = "/home/ubuntu/criteo_full/"
+criteoDir = 'criteo_full'
 
 criteoDF = None
 count = 0
@@ -107,27 +96,15 @@ for filename in os.listdir(criteoDir):
             .parquet(os.path.join(criteoDir, filename))   # Creates a DataFrame from Parquet after reading in the file
           )
       criteoDF = criteoDF.union(temp)
-    # count += 1
-    # if count >= 5:
-    #   break
+    count += 1
+    if count >= 5:
+      break
 
 
 
 
 criteoDF = criteoDF.repartition(5000)
 
-
-# criteoSmallDF.printSchema()
-
-# # take small subset
-# subset = criteoSmallDF.take(1000)
-# rdd = sc.parallelize(subset)
-# df=rdd.toDF()
-
-# df.groupBy('label').count().orderBy('label').show()
-# criteoDF.sample(False, 0.01)
-
-# Create balanced dataset
 
 critieo_clicked = criteoDF.filter(col("label")==1)
 critieo_unclicked = criteoDF.filter(col("label")==0)
@@ -137,6 +114,7 @@ criteoDF = critieo_clicked.union(critieo_unclicked)
 
 # filter columns to be cleaned
 
+criteoDF = criteoDF.repartition(5000)
 
 # label column has no missing data
 columns = criteoDF.columns[1:]
@@ -181,8 +159,6 @@ numeric_imputer = Imputer(
 )
 
 criteoDF = numeric_imputer.fit(criteoDF).transform(criteoDF)
-# output = type(criteoDF)
-# print(output)
 criteoDF = criteoDF.drop(*numeric_cols_impute)
 
 categorical_cols = ['c_'+str(i+1) for i in range(26) if ('c_'+str(i+1) not in columns_70) and ('c_'+str(i+1) not in columns_40)]
@@ -200,18 +176,13 @@ for k in categorical_cols:
 
 categorical_cols_encoded = ["{}_encoded".format(c) for c in categorical_cols]
 
-#Fits a model to the input dataset with optional parameters.
-# stringindex_vector  = StringIndexer(
-#   inputCols=ordinal_cols, 
-#   outputCols=["{}_encoded".format(c) for c in ordinal_cols]
-# )
 
 for i in range(len(categorical_cols)):
   stringindex_vector  = StringIndexer(
     inputCol=categorical_cols[i], 
     outputCol=categorical_cols_encoded[i]
   )
-  criteoDF = stringindex_vector.fit(criteoDF).transform(criteoDF)
+  criteoDF = stringindex_vector.setHandleInvalid("skip").fit(criteoDF).transform(criteoDF)
 
 criteoDF = criteoDF.drop(*categorical_cols)
 
@@ -224,25 +195,16 @@ for i in range(len(one_hot_cols)):
     inputCol=one_hot_cols_new[i], 
     outputCol=one_hot_cols_encoded[i]
   )
-  # print(dir(stringindex_vector))
-  # print(dir(onehotencoder_vector))
   criteoDF = onehotencoder_vector.transform(criteoDF)
-  # break
 
 criteoDF = criteoDF.drop(*one_hot_cols_new)
 
 
-# print(one_hot_cols)
 
 
 feature_cols = [c for c in criteoDF.columns if c != 'label']
 assembler = VectorAssembler(inputCols=feature_cols,outputCol="features")
 criteoDF = assembler.transform(criteoDF)
-
-# print('total cols: {0}'.format(criteoDF.columns))
-# print('feature cols: {0}'.format(feature_cols))
-# criteoDF.show(5)
-
   
 
 criteoDF_for_model = criteoDF.select(["label","features"])
@@ -252,27 +214,12 @@ criteoTrain, criteoTest = criteoDF_for_model.randomSplit([0.7, 0.3], seed=2018)
 
 
 
-def convert_to_numpy(df):
-  vector_udf = udf(lambda vector: vector.toArray().tolist(), ArrayType(DoubleType()))
-  df_temp = df.withColumn('expanded_features', vector_udf(col('features')))
-  x = np.array(df_temp.select('expanded_features').rdd.map(lambda x: x[0]).collect())
-  y = np.array(df_temp.select('label').rdd.map(lambda x: x).collect())
-  return x, y
-
-
-
-
-# X_test, y_test = convert_to_numpy(criteoTest)
-
-# print(X_test.shape)
-# print(y_test.shape)
-
-
-
 
 
 # Save the train data
-criteoTrainParquet = "/home/ubuntu/criteoSubset_train"
+criteoTrainParquet = "criteo_train"
+
+criteoTrain = criteoTrain.repartition(500)
 
 (criteoTrain.write                       # Our DataFrameWriter
   .option("delimiter", "\t")  
@@ -283,7 +230,9 @@ criteoTrainParquet = "/home/ubuntu/criteoSubset_train"
 
 
 # Save the test data
-criteoTestParquet = "/home/ubuntu/criteoSubset_test"
+criteoTestParquet = "criteo_test"
+
+criteoTest = criteoTest.repartition(500)
 
 (criteoTest.write                       # Our DataFrameWriter
   .option("delimiter", "\t")  
@@ -292,28 +241,6 @@ criteoTestParquet = "/home/ubuntu/criteoSubset_test"
   .parquet(criteoTestParquet)               # Write DataFrame to parquet files
 )
 
+print('Max distinct: '.format(max_distinct))
 
-
-# from pyspark.ml.classification import RandomForestClassifier
-# rf = RandomForestClassifier(labelCol="label", featuresCol="features", numTrees=50, maxDepth=25, maxBins = max_distinct)
-
-# Modelrf = rf.fit(criteoTrain)
-
-
-# critieoTestPredictions_rf = (Modelrf
-#                        .transform(criteoTest)
-#                        .cache())
-
-# # model accuracy for random forest model
-# # from pyspark.sql.functions import col
-
-# def modelAccuracy(df):
-#     return (df
-#           .select((col('prediction') == col('label')).cast('int').alias('correct'))
-#           .groupBy()
-#           .avg('correct')
-#           .first()[0])
-
-# modelAccuracy = modelAccuracy(critieoTestPredictions_rf)
-# print('modelOneAccuracy for the Random Forest model: {0:.3f}'.format(modelAccuracy))
 
