@@ -1,10 +1,10 @@
 # Harvard CS205 Final Project for Group 2
-Contributor: Jerri Zhang, Sean Gao, Yuxin Xu, Junyi Guo
+Contributors: Jerri Zhang, Sean Gao, Yuxin Xu, Junyi Guo
+
+This is the Github repo for Harvard CS205 Final Project. We performed Click-Through Rate Prediction with Parallelism on AWS EC2 instances and EMR Hadoop Cluster. 
 
 ## Google site link:
 https://sites.google.com/view/ctrpredictionparallelism/overview
-
-This is the Github repo for Harvard CS205 Final Project. We performed Click-Through Rate Prediction with Parallelism on AWS EC2 instances and EMR Hadoop Cluster. 
 
 ## Project Organization
 ------------
